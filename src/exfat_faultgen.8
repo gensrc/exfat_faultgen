@@ -1,0 +1,533 @@
+.\"
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.Dd November 18, 2026
+.Dt EXFAT_FAULTGEN 8
+.Os
+.Sh NAME
+.Nm exfat_faultgen
+.Nd exFAT file system fault injection and stress-testing utility
+.Sh SYNOPSIS
+.Nm
+.Op Fl h | Fl Fl help
+.Op Fl j | Fl Fl json
+.Op Fl n | Fl Fl dry-run
+.Op Fl v | Fl Fl verbose
+.Ar option
+.Ar image
+.Sh DESCRIPTION
+The
+.Nm
+utility inspects exFAT file systems and injects targeted, specification-level
+corruptions into an exFAT file system image or block device.
+It is primarily designed to verify consistency checking and recovery
+routines in
+.Xr fsck_exfat 8
+and kernel drivers such as
+.Xr mount_exfat 8 .
+.Pp
+Exactly one fault injection or utility option must be specified per invocation.
+Mutations directly alter on-disk structures while maintaining partition
+geometry unless a fault specifically targets geometric properties.
+Inspection and utility options operate in read-only mode and do not modify
+the image.
+.Sh OPTIONS
+The following general options are available:
+.Bl -tag -width indent
+.It Fl h , Fl Fl help
+Display a synopsis of available command-line options and exit.
+.It Fl j , Fl Fl json
+Emit inspection and verification results in machine-readable JSON format.
+Can be combined with
+.Fl Fl verify
+or any of the
+.Fl Fl dump-*
+options.
+When specified without an explicit utility option, defaults to
+.Fl Fl verify .
+.It Fl n , Fl Fl dry-run
+Simulate the fault injection without writing mutations to disk.
+When combined with
+.Fl v ,
+diagnostic messages show the exact offsets and values that would be
+modified.
+.It Fl v , Fl Fl verbose
+Enable verbose diagnostic output, printing opened image geometry,
+cluster sizes, and sector offsets.
+.El
+.Pp
+The following inspection and utility options are available:
+.Ss Inspection and Utility Options
+.Bl -tag -width indent
+.It Fl Fl dump-all
+Perform a comprehensive audit of the exFAT volume, combining all inspection
+utilities into a single unified report.
+Displays Boot Sector parameters and verifies checksums (Spec Section 3),
+inspects the File Allocation Table and cluster chains (Spec Section 4.1),
+evaluates Allocation Bitmap status and runs (Spec Section 7.1),
+and recursively audits all directory entry sets, stream extensions, and
+file names while detecting anomalies or cycles (Spec Section 6, 7).
+Inspection runs in read-only mode and does not modify the image.
+.It Fl Fl dump-bitmap Op Ar range
+Inspect and display cluster allocation status from the Allocation Bitmap
+(Spec Section 7.1).
+When invoked without arguments, displays the full allocation run map and
+summary statistics for all clusters in the volume.
+If
+.Ar range
+is given as a single cluster number
+.Pq e.g., Ar 5 ,
+the allocation state of that cluster is queried.
+If
+.Ar range
+is specified as a cluster span
+.Pq e.g., Ar 2,100 No or Ar 2-100 ,
+allocation runs and statistics are restricted to the given range.
+Inspection runs in read-only mode and does not modify the image.
+.It Fl Fl dump-boot Op Ar region
+Inspect and display Boot Sector and Volume Boot Record (VBR) parameters,
+compare Main and Backup boot sectors, and verify 32-bit boot region
+checksums (Spec Section 3.1, 3.4).
+When invoked without arguments, displays the Main Boot Sector fields,
+compares Main and Backup boot sectors for discrepancies, and verifies
+both Main and Backup region checksums.
+If
+.Ar region
+is specified as
+.Cm main ,
+only the Main Boot Sector and its checksum are displayed.
+If specified as
+.Cm backup ,
+the Backup Boot Sector (Sector 12) and its checksum are displayed.
+Inspection runs in read-only mode and does not modify the image.
+.It Fl Fl dump-fat Op Ar range | cn
+Inspect and display File Allocation Table (FAT) entries, trace cluster
+chains, detect circular references, compare dual-FAT mirrors on TexFAT
+volumes, and report allocation statistics (Spec Section 4.1).
+When invoked without arguments, displays the entire cluster heap allocation
+runs and overall FAT statistics.
+If specified as a single cluster number
+.Pq e.g., Ar 5 ,
+displays the 32-bit FAT entry value, entry classification (Free, EOF,
+Bad Cluster, or Next Cluster), sector and byte offsets within the FAT,
+comparison against mirror FAT (if dual-FAT), and traces the cluster chain
+forward with cycle detection.
+If specified as a cluster span
+.Pq e.g., Ar 2,100 No or Ar 2-100 ,
+allocation runs, bad cluster markers, EOF markers, and statistics are
+restricted to the given range.
+Inspection runs in read-only mode and does not modify the image.
+.It Fl Fl dump-dentries Op Ar path | cn
+Inspect and display exFAT directory entries, directory entry sets, stream
+extensions, file names, attributes, timestamps, and verify SetChecksum and
+NameHash integrity across the volume (Spec Section 6.3, 7.4).
+When invoked without arguments, displays all directory entries starting from
+the Root Directory and recursively traverses subdirectories while detecting
+circular directory loops.
+If specified as a cluster number
+.Pq e.g., Ar 5 ,
+restricts inspection to the directory starting at that cluster.
+If specified as a path or file name
+.Pq e.g., Ar /docs No or Ar sample.txt ,
+inspects the matching directory or displays the detailed directory entry set
+of the target file.
+Validates 16-bit SetChecksum, NameHash, missing Stream Extension entries,
+NameLength field consistency, FirstCluster heap bounds, directory stream
+allocation constraints, ValidDataLength versus DataLength, NoFatChain
+continuity, and flags invalid characters, orphaned secondary entries, or
+directory recursion loops.
+Inspection runs in read-only mode and does not modify the image.
+.It Fl Fl verify
+Perform a non-destructive volume consistency verification, aggregating defect
+counters across the Boot Region, File Allocation Table, Allocation Bitmap,
+and Directory Entry sets.
+Exits with status 0 if the volume is clean, or status 1 if any corruptions
+or specification violations are detected.
+Inspection runs in read-only mode and does not modify the image.
+.El
+.Pp
+The following fault injection options are available:
+.Ss Boot and VBR Options (Spec Section 3.1)
+.Bl -tag -width indent
+.It Fl Fl boot-checksum-mismatch
+Invert the 32-bit checksum in Sector 11 of the Main Boot region
+(Spec Section 3.4).
+.It Fl Fl boot-backup-mismatch
+Mutate the volume serial number in the Main Boot Sector without updating
+the Backup Boot Sector (Spec Section 3.1).
+.It Fl Fl boot-flags-reserved Op Ar mask
+Set invalid reserved bits (bits 4\(en15) in the
+.Va VolumeFlags
+field of the Main Boot Sector (Spec Section 3.1.13), defaulting to 0x0010.
+.It Fl Fl boot-percent-in-use Op Ar val
+Set the
+.Va PercentInUse
+field to an invalid value (>100 and != 0xFF), defaulting to 150
+(Spec Section 3.1.18).
+.It Fl Fl boot-drive-select Op Ar val
+Set the
+.Va DriveSelect
+field to an invalid INT 13h drive number (!= 0x00 and != 0x80),
+defaulting to 0x01 (Spec Section 3.1.17).
+.It Fl Fl boot-zero-fields
+Inject non-zero pattern bytes into the reserved
+.Va bs_must_be_zero
+and
+.Va bs_reserved
+fields (Spec Section 3.1, 3.1.3).
+.El
+.Ss File Allocation Table (FAT) Options (Spec Section 4.1)
+.Bl -tag -width indent
+.It Fl Fl fat-cycle Ar cluster
+Create a circular cluster cycle in the FAT chain (Spec Section 4.1.3).
+If
+.Ar cluster
+is specified as
+.Ar cn ,
+the entry points back to itself.
+If specified as
+.Ar src,dst ,
+entry
+.Ar src
+points to
+.Ar dst .
+.It Fl Fl fat-bad-cluster Ar cluster
+Mark the specified allocated cluster as
+.Dv EXFAT_FAT_BAD
+(0xFFFFFFF7) in the FAT (Spec Section 4.1.3).
+.It Fl Fl fat-crosslink Ar src,dst
+Cross-link two distinct cluster chains by setting the FAT entry for
+cluster
+.Ar src
+to point to cluster
+.Ar dst
+(Spec Section 4.1.3).
+.It Fl Fl fat-out-of-bounds Ar cluster
+Point the FAT entry of the specified cluster beyond the valid cluster
+heap range (>= ClusterCount + 2 and < 0xFFFFFFF7) (Spec Section 4.1.3).
+An explicit out-of-bounds cluster target can optionally be passed as
+.Ar cn,target .
+.It Fl Fl fat-mirror-diverge Op Ar cluster
+Mutate an entry in the secondary FAT on TexFAT volumes
+.Pq NumberOfFats == 2
+to cause divergence from the active FAT (Spec Section 3.1.13.1, 4.1).
+Returns an error if the volume only has a single FAT.
+.El
+.Ss Allocation Bitmap Options (Spec Section 7.1)
+.Bl -tag -width indent
+.It Fl Fl bitmap-orphan Ar cluster
+Mark an unreferenced, free cluster as allocated in the Allocation Bitmap
+(Spec Section 7.1).
+.It Fl Fl bitmap-false-free Ar cluster
+Clear the allocation bitmap bit for an allocated cluster, making it
+falsely appear free while still referenced by a file (Spec Section 7.1).
+.It Fl Fl bitmap-truncate
+Truncate the recorded
+.Va DataLength
+in the Allocation Bitmap directory entry to less than the required
+cluster heap coverage (Spec Section 7.1.4).
+.It Fl Fl bitmap-mirror-diverge Op Ar cluster
+Mutate the allocation bit of a cluster in the secondary Allocation Bitmap
+on dual-FAT volumes
+.Pq NumberOfFats == 2
+to cause divergence from the active Allocation Bitmap
+(Spec Section 3.1.13.1, 7.1).
+Returns an error if the volume only has a single FAT.
+.It Fl Fl bitmap-flags-reserved Op Ar flags
+Set invalid reserved bits in the
+.Va BitmapFlags
+field of the Allocation Bitmap directory entry (Spec Section 7.1.2).
+On single-FAT volumes without arguments, sets
+.Dv EXFAT_BITMAP_FLAG_SECOND
+and reserved bit 7.
+.El
+.Ss Directory Entry and Stream Options (Spec Section 6.3, 7.4, 7.6, 7.7)
+.Bl -tag -width indent
+.It Fl Fl dentry-checksum Ar target
+Corrupt the 16-bit
+.Va SetChecksum
+field in the primary File Directory Entry (0x85) of
+.Ar target
+(Spec Section 6.3.3, 7.4.3).
+.Ar target
+may be specified by filename, entry index, or starting cluster.
+.It Fl Fl dentry-secondary-count Ar target Op Ar count
+Corrupt the 8-bit
+.Va SecondaryCount
+field in the primary File Directory Entry (0x85) of
+.Ar target
+(Spec Section 7.4.2).
+If
+.Ar count
+is provided, sets the field to that value; otherwise sets it to 1 (violating the
+minimum count of 2) or decrements the count, while recalculating
+.Va SetChecksum
+to isolate the structural count defect.
+.It Fl Fl dentry-name-hash Ar target Op Ar hash
+Corrupt the 16-bit
+.Va NameHash
+field in the Stream Extension entry (0xC0) of
+.Ar target
+(Spec Section 7.6.4).
+If
+.Ar hash
+is provided, sets the field to that value; otherwise inverts the stored hash,
+while recalculating
+.Va SetChecksum
+to isolate the name hash mismatch.
+.It Fl Fl dentry-invalid-name-chars Ar target Op Ar char
+Inject forbidden characters into the File Name secondary entries (0xC1) of
+.Ar target
+(Spec Section 7.7.3).
+If
+.Ar char
+is provided, injects that character code; otherwise injects a colon
+.Pq Ql \&: ,
+while recalculating
+.Va SetChecksum
+to isolate the invalid character defect.
+.It Fl Fl dentry-size-mismatch Ar target Op Ar bytes
+Modify the
+.Va DataLength
+and
+.Va ValidDataLength
+fields in the Stream Extension entry (0xC0) of
+.Ar target
+to create a discrepancy with the allocated cluster chain in the FAT (Spec
+Section 7.6.5, 7.6.7).
+If
+.Ar bytes
+is provided, sets both lengths to that value; otherwise sets them to exceed
+the allocated FAT chain by two clusters, while recalculating
+.Va SetChecksum .
+.It Fl Fl stream-vdl-exceeds-dl Ar target
+Set the
+.Va ValidDataLength
+field to exceed
+.Va DataLength
+in the Stream Extension entry (0xC0) of
+.Ar target ,
+recalculating
+.Va SetChecksum
+to isolate the VDL violation (Spec Section 7.6.5).
+.It Fl Fl stream-nofatchain-fragment Ar target
+Assert the
+.Dv EXFAT_FLAG_NO_FAT_CHAIN
+flag on the stream extension of
+.Ar target
+while fragmenting its cluster allocation in the FAT (Spec Section 6.4.2, 7.6.2).
+.It Fl Fl dentry-orphaned-secondary Op Ar offset
+Write an unparented secondary Stream Extension entry (0xC0) at the
+specified directory slot or byte offset
+.Ar offset
+without a preceding primary entry (Spec Section 6.3, 6.4).
+.It Fl Fl dentry-root-in-subdir Ar target
+Set the
+.Va FirstCluster
+of directory
+.Ar target
+to point back to the Root Directory cluster, creating an invalid directory
+loop (Spec Section 6.3).
+.El
+.Ss Up-case Table Options (Spec Section 7.2)
+.Bl -tag -width indent
+.It Fl Fl upcase-checksum-mismatch Op Ar csum
+Corrupt the 32-bit
+.Va TableChecksum
+field in the Up-case Table directory entry (0x82) in the Root Directory
+(Spec Section 7.2.2).
+If
+.Ar csum
+is provided, sets the checksum to that value; otherwise inverts the stored
+checksum bits.
+.It Fl Fl upcase-truncate Op Ar bytes | chain
+Truncate the recorded
+.Va DataLength
+field or the FAT cluster chain of the Up-case Table directory entry (0x82)
+(Spec Section 7.2.4).
+If
+.Ar chain
+is given, terminates the FAT allocation chain at the first cluster while
+retaining DataLength.
+If
+.Ar bytes
+is given, sets DataLength to that byte count.
+When omitted, truncates DataLength so the compressed Up-case Table stream cannot
+define all 65,536 characters and terminates the FAT allocation chain.
+.El
+.Ss Volume Label and GUID Options (Spec Section 7.3, 7.5)
+.Bl -tag -width indent
+.It Fl Fl label-duplicate Op Ar name
+Inject a duplicate Volume Label directory entry (0x83) into the Root Directory
+(Spec Section 7.3.1).
+If
+.Ar name
+is provided, assigns that label to the duplicate entry.
+.It Fl Fl label-invalid-chars Op Ar char
+Inject forbidden characters
+.Pq Ql \&" , Ql * , Ql / , Ql \&: , Ql < , Ql > , Ql \&? , Ql \e , Ql \&|
+or control characters below 0x0020
+into the Volume Label directory entry (Spec Section 7.3.3).
+.It Fl Fl label-length Op Ar count
+Set
+.Va CharacterCount
+to exceed the specification limit of 11 characters (e.g. 12) in the Volume Label
+directory entry (Spec Section 7.3.2).
+.It Fl Fl guid-duplicate Op Ar guid
+Inject a duplicate Volume GUID directory entry (0xA0) into the Root Directory
+(Spec Section 7.5.1).
+If
+.Ar guid
+is provided in standard GUID format, assigns that identifier to the
+duplicate entry.
+.It Fl Fl guid-invalid Op Ar field
+Set non-zero
+.Va SecondaryCount
+(Spec Section 7.5.2) or non-zero
+.Va GeneralPrimaryFlags
+(Spec Section 7.5.4) in the Volume GUID directory entry.
+If
+.Ar field
+is
+.Cm flags ,
+mutates GeneralPrimaryFlags; if
+.Cm count ,
+mutates SecondaryCount; otherwise mutates both.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+Perform non-destructive volume consistency verification:
+.Pp
+.Dl "exfat_faultgen --verify exfat.img"
+.Pp
+Emit volume verification in JSON format for automated test runners:
+.Pp
+.Dl "exfat_faultgen --json exfat.img"
+.Pp
+Perform a comprehensive volume audit and inspection report:
+.Pp
+.Dl "exfat_faultgen --dump-all exfat.img"
+.Pp
+Dump Boot Sector parameters and verify checksums:
+.Pp
+.Dl "exfat_faultgen --dump-boot exfat.img"
+.Pp
+Inspect only the Backup Boot Sector:
+.Pp
+.Dl "exfat_faultgen --dump-boot backup exfat.img"
+.Pp
+Inspect allocation status for cluster 10:
+.Pp
+.Dl "exfat_faultgen --dump-bitmap 10 exfat.img"
+.Pp
+Display allocation runs across clusters 2 through 100:
+.Pp
+.Dl "exfat_faultgen --dump-bitmap 2,100 exfat.img"
+.Pp
+Dump full volume allocation statistics:
+.Pp
+.Dl "exfat_faultgen --dump-bitmap exfat.img"
+.Pp
+Inspect FAT entry and trace cluster chain for cluster 5:
+.Pp
+.Dl "exfat_faultgen --dump-fat 5 exfat.img"
+.Pp
+Display FAT allocation runs across clusters 2 through 100:
+.Pp
+.Dl "exfat_faultgen --dump-fat 2,100 exfat.img"
+.Pp
+Dump full volume FAT statistics and allocation runs:
+.Pp
+.Dl "exfat_faultgen --dump-fat exfat.img"
+.Pp
+Dump all directory entries across the volume:
+.Pp
+.Dl "exfat_faultgen --dump-dentries exfat.img"
+.Pp
+Inspect directory entries in a specific subdirectory:
+.Pp
+.Dl "exfat_faultgen --dump-dentries /docs exfat.img"
+.Pp
+Inspect directory entry set for a specific file:
+.Pp
+.Dl "exfat_faultgen --dump-dentries sample.txt exfat.img"
+.Pp
+Inject a boot region checksum mismatch into an image:
+.Pp
+.Dl "exfat_faultgen --boot-checksum-mismatch exfat.img"
+.Pp
+Simulate creating a circular FAT loop on cluster 5 in dry-run verbose mode:
+.Pp
+.Dl "exfat_faultgen -n -v --fat-cycle 5 exfat.img"
+.Pp
+Mark cluster 12 as a bad cluster:
+.Pp
+.Dl "exfat_faultgen --fat-bad-cluster 12 exfat.img"
+.Pp
+Corrupt the Up-case Table checksum:
+.Pp
+.Dl "exfat_faultgen --upcase-checksum-mismatch exfat.img"
+.Pp
+Truncate the Up-case Table data length:
+.Pp
+.Dl "exfat_faultgen --upcase-truncate exfat.img"
+.Pp
+Set ValidDataLength greater than DataLength on file
+.Dq test.txt :
+.Pp
+.Dl "exfat_faultgen --stream-vdl-exceeds-dl test.txt exfat.img"
+.Pp
+Corrupt SecondaryCount on file
+.Dq test.txt :
+.Pp
+.Dl "exfat_faultgen --dentry-secondary-count test.txt exfat.img"
+.Pp
+Inject an invalid character into the name of file
+.Dq test.txt :
+.Pp
+.Dl "exfat_faultgen --dentry-invalid-name-chars test.txt exfat.img"
+.Pp
+Verify repair capabilities with
+.Xr fsck_exfat 8 :
+.Pp
+.Dl "exfat_faultgen --bitmap-orphan 8 exfat.img"
+.Dl "fsck_exfat -y exfat.img"
+.Sh SEE ALSO
+.Xr fsck_exfat 8 ,
+.Xr mount_exfat 8 ,
+.Xr newfs_exfat 8
+.Sh STANDARDS
+The exFAT disk layout, structures, and fault injection criteria conform to the
+.Rs
+.%A Microsoft Corporation
+.%T exFAT File System Specification
+.%I Microsoft Learn
+.%U https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification
+.Re
+.Sh HISTORY
+The
+.Nm
+utility was developed for FreeBSD to support automated file system
+consistency validation and repair testing.
